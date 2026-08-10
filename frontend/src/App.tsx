@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import Layout from "./components/Layout";
 import Login from "./pages/Login";
+import Customers from "./pages/Customers";
 
 function App() {
   return (
@@ -10,7 +12,11 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedRoute />}>
-            <Route path="/customers" element={<div>Customers page coming next</div>} />
+            <Route element={<Layout />}>
+              <Route path="/customers" element={<Customers />} />
+              <Route path="/products" element={<div>Products page coming next</div>} />
+              <Route path="/challans" element={<div>Challans page coming next</div>} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/customers" replace />} />
         </Routes>
