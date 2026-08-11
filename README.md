@@ -73,7 +73,6 @@ No pagination UI on list views (customers/products/challans render full lists).
 No image upload support for products.
 No invoice/challan PDF export.
 Minimal styling — functionality-first UI, not a polished design pass.
-[Add any others specific to your implementation, e.g. no automated tests, no rate limiting, no soft-delete/audit trail, etc.]
 Tech Stack Summary
 Backend: Node.js, Express, TypeScript, Prisma, PostgreSQL, JWT
 Frontend: React, Vite
