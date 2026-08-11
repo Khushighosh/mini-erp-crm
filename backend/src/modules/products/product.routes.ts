@@ -2,122 +2,177 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../config/db";
 import { requireAuth, requireRole, AuthRequest } from "../../middleware/auth";
-
+ 
 const router = Router();
 router.use(requireAuth);
-
-const productSchema = z.object({
-  name: z.string().min(1),
-  sku: z.string().min(1),
-  category: z.string().optional(),
-  unitPrice: z.number().positive(),
-  currentStock: z.number().int().min(0).optional(),
-  minStockAlert: z.number().int().min(0).optional(),
-  location: z.string().optional(),
+ 
+const createChallanSchema = z.object({
+  customerId: z.string().min(1),
+  items: z
+    .array(
+      z.object({
+        productId: z.string().min(1),
+        quantity: z.number().int().positive(),
+      })
+    )
+    .min(1),
 });
-
-// GET /products?search=&page=&limit=
+ 
+async function generateChallanNumber(): Promise<string> {
+  const count = await prisma.challan.count();
+  const next = count + 1;
+  return `CH-${String(next).padStart(5, "0")}`;
+}
+ 
+// GET /challans?status=&page=&limit=
 router.get("/", async (req, res) => {
-  const search = (req.query.search as string) || "";
+  const status = req.query.status as string | undefined;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
-
-  const where = search
-    ? {
-        OR: [
-          { name: { contains: search, mode: "insensitive" as const } },
-          { sku: { contains: search, mode: "insensitive" as const } },
-        ],
-      }
-    : {};
-
-  const [products, total] = await Promise.all([
-    prisma.product.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: "desc" } }),
-    prisma.product.count({ where }),
+ 
+  const where = status ? { status: status as any } : {};
+ 
+  const [challans, total] = await Promise.all([
+    prisma.challan.findMany({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: { customer: true, items: true },
+    }),
+    prisma.challan.count({ where }),
   ]);
-
-  res.json({ data: products, page, limit, total });
+ 
+  res.json({ data: challans, page, limit, total });
 });
-
-// GET /products/:id
+ 
+// GET /challans/:id
 router.get("/:id", async (req, res) => {
-  const product = await prisma.product.findUnique({ where: { id: req.params.id } });
-  if (!product) return res.status(404).json({ error: "Product not found" });
-  res.json(product);
+  const id = String(req.params.id);
+  const challan = await prisma.challan.findUnique({
+    where: { id },
+    include: { customer: true, items: true, createdBy: { select: { name: true, email: true } } },
+  });
+  if (!challan) return res.status(404).json({ error: "Challan not found" });
+  res.json(challan);
 });
-
-// POST /products
-router.post("/", requireRole("ADMIN", "WAREHOUSE"), async (req, res) => {
-  const parsed = productSchema.safeParse(req.body);
+ 
+// POST /challans — create as Draft
+router.post("/", requireRole("ADMIN", "SALES"), async (req: AuthRequest, res) => {
+  const parsed = createChallanSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
   }
-  try {
-    const product = await prisma.product.create({ data: parsed.data });
-    res.status(201).json(product);
-  } catch (e: any) {
-    if (e.code === "P2002") {
-      return res.status(409).json({ error: "SKU already exists" });
-    }
-    res.status(500).json({ error: "Failed to create product" });
+  const { customerId, items } = parsed.data;
+ 
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) return res.status(404).json({ error: "Customer not found" });
+ 
+  const productIds = items.map((i) => i.productId);
+  const products = await prisma.product.findMany({ where: { id: { in: productIds } } });
+  if (products.length !== productIds.length) {
+    return res.status(404).json({ error: "One or more products not found" });
   }
-});
-
-// PUT /products/:id
-router.put("/:id", requireRole("ADMIN", "WAREHOUSE"), async (req, res) => {
-  const parsed = productSchema.partial().safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
-  }
-  try {
-    const product = await prisma.product.update({ where: { id: req.params.id }, data: parsed.data });
-    res.json(product);
-  } catch {
-    res.status(404).json({ error: "Product not found" });
-  }
-});
-
-// POST /products/:id/stock-movement — manual stock adjustment (IN/OUT)
-const movementSchema = z.object({
-  quantity: z.number().int().positive(),
-  movementType: z.enum(["IN", "OUT"]),
-  reason: z.string().optional(),
-});
-
-router.post("/:id/stock-movement", requireRole("ADMIN", "WAREHOUSE"), async (req: AuthRequest, res) => {
-  const parsed = movementSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
-  }
-  const { quantity, movementType, reason } = parsed.data;
-  const productId = req.params.id;
-
-  const product = await prisma.product.findUnique({ where: { id: productId } });
-  if (!product) return res.status(404).json({ error: "Product not found" });
-
-  if (movementType === "OUT" && product.currentStock < quantity) {
-    return res.status(400).json({ error: "Insufficient stock for this movement" });
-  }
-
-  const delta = movementType === "IN" ? quantity : -quantity;
-
-  const [updatedProduct, movement] = await prisma.$transaction([
-    prisma.product.update({
-      where: { id: productId },
-      data: { currentStock: { increment: delta } },
-    }),
-    prisma.stockMovement.create({
-      data: {
-        productId,
-        quantity,
-        movementType,
-        reason,
-        createdById: req.user!.userId,
+ 
+  const challanNumber = await generateChallanNumber();
+  const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
+ 
+  const challan = await prisma.challan.create({
+    data: {
+      challanNumber,
+      customerId,
+      status: "DRAFT",
+      totalQuantity,
+      createdById: req.user!.userId,
+      items: {
+        create: items.map((item) => {
+          const product = products.find((p) => p.id === item.productId)!;
+          return {
+            productId: product.id,
+            productName: product.name,
+            productSku: product.sku,
+            unitPrice: product.unitPrice,
+            quantity: item.quantity,
+          };
+        }),
       },
-    }),
-  ]);
-
-  res.status(201).json({ product: updatedProduct, movement });
+    },
+    include: { items: true, customer: true },
+  });
+ 
+  res.status(201).json(challan);
 });
-
+ 
+// POST /challans/:id/confirm — the critical business logic
+router.post("/:id/confirm", requireRole("ADMIN", "SALES"), async (req: AuthRequest, res) => {
+  const challanId: string = String(req.params.id);
+ 
+  const challan = await prisma.challan.findUnique({
+    where: { id: challanId },
+    include: { items: true },
+  });
+  if (!challan) return res.status(404).json({ error: "Challan not found" });
+  if (challan.status !== "DRAFT") {
+    return res.status(400).json({ error: `Challan is already ${challan.status}, cannot confirm` });
+  }
+ 
+  // Check stock sufficiency for every item BEFORE making any changes
+  const productIds = challan.items.map((i) => i.productId);
+  const products = await prisma.product.findMany({ where: { id: { in: productIds } } });
+ 
+  for (const item of challan.items) {
+    const product = products.find((p) => p.id === item.productId);
+    if (!product || product.currentStock < item.quantity) {
+      return res.status(400).json({
+        error: `Insufficient stock for ${item.productName}. Available: ${product?.currentStock ?? 0}, required: ${item.quantity}`,
+      });
+    }
+  }
+ 
+  // All checks passed — perform deduction + movement logging + status update atomically
+  const operations = [
+    prisma.challan.update({ where: { id: challanId }, data: { status: "CONFIRMED" as const } }),
+    ...challan.items.flatMap((item) => [
+      prisma.product.update({
+        where: { id: item.productId },
+        data: { currentStock: { decrement: item.quantity } },
+      }),
+      prisma.stockMovement.create({
+        data: {
+          productId: item.productId,
+          quantity: item.quantity,
+          movementType: "OUT" as const,
+          reason: `Challan ${challan.challanNumber}`,
+          createdById: req.user!.userId,
+        },
+      }),
+    ]),
+  ];
+ 
+  await prisma.$transaction(operations);
+ 
+  const updatedChallan = await prisma.challan.findUnique({
+    where: { id: challanId },
+    include: { items: true, customer: true },
+  });
+ 
+  res.json(updatedChallan);
+});
+ 
+// POST /challans/:id/cancel
+router.post("/:id/cancel", requireRole("ADMIN", "SALES"), async (req, res) => {
+  const id = String(req.params.id);
+  const challan = await prisma.challan.findUnique({ where: { id } });
+  if (!challan) return res.status(404).json({ error: "Challan not found" });
+  if (challan.status === "CONFIRMED") {
+    return res.status(400).json({ error: "Cannot cancel a confirmed challan" });
+  }
+  const updated = await prisma.challan.update({
+    where: { id },
+    data: { status: "CANCELLED" as const },
+  });
+  res.json(updated);
+});
+ 
 export default router;
+ 

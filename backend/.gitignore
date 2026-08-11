@@ -1,7 +1,11 @@
 .agents/
 .claude/
 .windsurf/
-skills-lock.jsonnode_modules
+
+skills-lock.json
+node_modules/
+dist/
+
 # Keep environment variables out of version control
 .env
 

@@ -1,4 +1,6 @@
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
+
 import { api } from "../api/client";
 
 interface Customer {
