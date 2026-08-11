@@ -66,13 +66,14 @@ Warehouse	warehouse@test.com	password123
 Accounts	accounts@test.com	password123
 API Testing
 
-A Postman collection covering all tested endpoints (login, customers CRUD, products CRUD + stock-movement, challans create/confirm/cancel) is included in this repo: <POSTMAN_COLLECTION_FILENAME>. Requests are configured against the live Render URL.
+A Postman collection covering all tested endpoints (login, customers CRUD, products CRUD + stock-movement, challans create/confirm/cancel) is included in this repo: <https://go.postman.co/workspace/8215dd9f-a7f7-44bf-813c-253fc42b5f6c>. Requests are configured against the live Render URL.
 
 Known Limitations
 No pagination UI on list views (customers/products/challans render full lists).
 No image upload support for products.
 No invoice/challan PDF export.
 Minimal styling — functionality-first UI, not a polished design pass.
+
 Tech Stack Summary
 Backend: Node.js, Express, TypeScript, Prisma, PostgreSQL, JWT
 Frontend: React, Vite
