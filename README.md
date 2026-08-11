@@ -5,7 +5,7 @@ A full-stack inventory/sales management system with role-based access control â€
 Live Links
 Frontend (Vercel): <https://vercel.com/api-31d2/mini-erp-crm>
 Backend API (Render): <https://mini-erp-crm-o6k9.onrender.com>
-GitHub Repo: <PASTE_REPO_URL_HERE>
+GitHub Repo: <https://github.com/Khushighosh/mini-erp-crm>
 
 Architecture
 
